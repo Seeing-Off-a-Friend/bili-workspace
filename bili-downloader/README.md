@@ -1,0 +1,197 @@
+# B站视频批量下载（重构版）
+
+搜索关键词 → 取搜索结果 → 解析音视频直链 → 下载 → 合并成 mp4。命令行和网页两个入口，
+**共用同一套核心实现**（`bili_core.py`），不再有两份复制粘贴的代码。
+
+## 文件结构
+
+| 文件 | 作用 |
+| --- | --- |
+| `bili_config.py` | 唯一配置点：请求头、Cookie、默认保存路径、清晰度、会话文件读写 |
+| `bili_core.py` | 核心库：搜索 / 解析 / 下载 / 合并 / 一站式批量下载 |
+| `bili_login.py` | **一键获取登录态**：开浏览器 → 你登录 → 自动存 Cookie + UA |
+| `bili_player.py` | 用系统播放器打开视频 / 在资源管理器里定位文件（"下载完直接看"） |
+| `main.py` | 命令行入口（argparse，只解析参数） |
+| `web_app.py` | Flask 网页入口（只收参数、开线程、回传日志） |
+| `templates/index.html` | 网页界面 |
+| `run_login.bat` | 双击即可获取登录态（给不碰命令行的人用） |
+| `bili_session.json` | 自动生成的登录态（含凭据，**已被 .gitignore 忽略**） |
+| `selftest.py` | 自检脚本（离线 115 项 + 可选联网验证） |
+
+## 第一步：获取登录态（推荐，一次就够）
+
+不登录也能下载，但清晰度最高只有 480P。想让别人也能轻松用，跑一次这个就行 ——
+**不用手抄 Cookie**：
+
+```bat
+run_login.bat                 :: 双击这个最省事
+python bili_login.py          :: 等价写法
+python main.py --login        :: 命令行入口下也有一份
+python bili_login.py --check  :: 不开浏览器，只报告当前登录态
+```
+
+它会打开一个 Chrome 窗口并访问 B 站，你在里面登录（扫码即可），程序每 2 秒检测一次，
+确认登录后自动把 **Cookie + 浏览器真实 UA + 昵称 + 大会员状态** 写进 `bili_session.json`。
+网页版也有对应按钮：「一键获取登录态（可选）」。
+
+之后 `main.py` / `web_app.py` 会自动读取这个文件，优先级是：
+
+```
+函数参数  >  环境变量 BILI_COOKIE / BILI_UA  >  bili_session.json  >  bili_config.py 里硬编码的 Cookie
+```
+
+另外，**搜索时浏览器已经开着，程序会顺手把登录态刷新进 `bili_session.json`**，
+所以在弹出的 Chrome 里登录过一次之后，Cookie 过期基本不用管。
+
+## 命令行用法
+
+```bat
+python main.py                                  :: 默认关键词，下第 1~2 个
+python main.py 无极魔尊 -s 1 -e 3                :: 关键词 + 范围
+python main.py 无极魔尊 -s 1 -e 3 -p "D:\视频"    :: 指定保存目录
+python main.py --url "https://www.bilibili.com/video/BV1xx"           :: 按网址下单个视频
+python main.py --url "https://www.bilibili.com/video/BV1xx?p=3"       :: 只下第 3 个分P
+python main.py --url "BV1Bvbv6TEtT" --url "av123456"                  :: 直接粘号，可重复传
+python main.py --url "https://space.bilibili.com/123/video" -s 1 -e 5 :: UP主主页取前 5 个
+python main.py --url-file 网址清单.txt                                 :: 从文件批量读网址
+python main.py --login                          :: 打开浏览器登录并保存
+python main.py --check                          :: 只看登录状态
+python main.py 关键词 -e 5 --keep-temp           :: 保留临时 m4s，方便排查
+python main.py 关键词 -e 3 --play --open-folder  :: 下完直接打开播放器和目录
+python main.py 关键词 -e 3 --player "C:\Program Files\DAUM\PotPlayer\PotPlayerMini64.exe"
+```
+
+## 按网址下载
+
+除了按关键词搜索，也可以直接给网址。支持这些写法：
+
+| 你给的网址 | 行为 |
+| --- | --- |
+| `https://www.bilibili.com/video/BVxxxxxxxxxx` | 下载这个视频 |
+| 同一条链接带 `?p=3` | **只下第 3 个分P**，标题自动带 `_P3_分P名` |
+| `BV1Bvbv6TEtT` / `av123456` | 直接粘号也行（不用带域名） |
+| `https://b23.tv/xxxxxx` | 短链会自动还原成真实地址 |
+| 合集 / 收藏夹 / UP主主页 / 频道 | 自动打开浏览器**展开成视频列表**再下，`-s/-e` 指定取第几个 |
+| 搜索结果页 | 同上（把页面里看到的视频都抓出来） |
+
+- **范围语义**：`-s/-e` 只对"展开出多个视频"的网址生效；单个视频链接不受影响。
+  网址模式不传 `-s/-e` 就是**全部都下**（不像搜索模式默认 1~2）。
+- **列表页为什么用浏览器抓而不是调接口**：接口要 WBI 签名、还有登录限制；
+  浏览器抓则是"页面能看到什么就能抓到什么"，也不容易因为签名算法变动而失效。
+- 多个网址之间顺序处理，**某一个不合法/失败不会影响其它网址**，最后统一汇总。
+- 网页版同样支持：下载方式切到「按网址下载」，一行一个链接粘进去（`#` 开头的行当注释）。
+
+## 网页用法
+
+```bat
+python web_app.py
+```
+
+然后打开 <http://127.0.0.1:5000>（只监听本机，不对外开放）。
+
+页面上「下载方式」可以选：
+- **搜索关键词** —— 填关键词 + 范围（第 N~M 个）
+- **按网址下载** —— 一行一个链接，支持 BV号 / av号 / b23.tv 短链 / 带 `?p=` 的分P / 合集、收藏夹、UP主主页
+
+下载完成后，日志区下方会出现**文件列表**：每个文件一行，带「播放」「打开所在文件夹」两个按钮，
+最下面一行是「打开保存目录」——不用再去文件夹里翻。
+
+## 下载完直接看
+
+三种触发方式，效果一样：
+
+| 方式 | 做法 |
+| --- | --- |
+| 命令行临时用 | `--play`（下完播第一个）/ `--open-folder`（下完开目录） |
+| 命令行永久开 | `set BILI_AUTO_PLAY=1`，或改 `bili_config.py` 里的 `AUTO_PLAY` |
+| 网页版 | 结果列表上的按钮，点哪个开哪个 |
+
+- `--player "路径"` 可以指定播放器；不指定就用系统默认关联程序（等于双击那个文件）。
+- `--no-play` / `--no-open-folder` 用来临时覆盖掉配置里的开关。
+- 打开失败（文件被删了、没装播放器）只会在日志里记一行，**不会影响已经下载好的文件**。
+- `bili_player.py` 只接受白名单扩展名 + 必须真实存在的文件；网页版的路径一律从服务端任务记录里取，
+  前端只能传"第几个"，所以这个接口不会变成"给个路径就执行"的入口。
+
+## 配置
+
+改 `bili_config.py`，或者用环境变量临时覆盖（不用改文件）：
+
+| 环境变量 | 含义 |
+| --- | --- |
+| `BILI_COOKIE` | 覆盖 Cookie |
+| `BILI_UA` | 覆盖 User-Agent |
+| `BILI_SAVE_PATH` | 默认保存目录 |
+| `BILI_KEYWORD` | 命令行默认关键词 |
+| `BILI_QUALITY` | 清晰度：80=1080P / 64=720P / 32=480P / 16=360P |
+| `BILI_AUTO_PLAY` | 设成 `1` 则下载完自动用播放器打开第一个视频 |
+| `BILI_AUTO_OPEN_FOLDER` | 设成 `1` 则下载完自动打开保存目录 |
+| `BILI_PLAYER` | 指定播放器可执行文件路径，留空用系统默认关联程序 |
+| `BILI_SESSION_FILE` | 登录态文件的位置（默认项目下的 `bili_session.json`） |
+
+**关于清晰度**：能拿多高取决于 Cookie 的登录态。`bili_config.py` 里那份硬编码 Cookie 已经失效
+（登录接口返回未登录），所以现在最高只能拿到 480P（854x476）—— 下载本身完全正常。
+**跑一次 `run_login.bat` 登录即可解决**，不用手抄任何 Cookie。
+
+## 解析策略（比旧版稳）
+
+1. **优先走官方 JSON 接口**：`x/web-interface/view` 拿标题和 cid → `x/player/playurl` 拿 dash 流，
+   然后自动挑【最高清晰度 + 同清晰度优先 AVC 编码】的视频流和【最高码率】的音频流。
+   `?p=3` 时用 `pages[2].cid`，只解析那一P。
+2. 接口失败才**回退到旧版的页面正则**（`"baseUrl":"..."`，第 1 条作视频、最后 1 条作音频）。
+   旧版只有这条路，一旦 B 站改版就 `IndexError`；现在它只是兜底，且失败会给出明确报错。
+3. **确定性错误不再触发回退**：视频被删、权限不足、分P不存在这类错误抛 `BiliError` 直接上报，
+   不套用页面正则 —— 否则请求第 99 个分P失败后，回退逻辑可能把第 1 个分P当"成功"下下来，静默给错文件。
+
+## 相比重构前修掉的问题
+
+- **网页版其实跑不起来**：旧 `bili_downloader.py` 里有三次 `input()`（请求头/Cookie/路径），
+  网页线程里没有可交互的标准输入，会卡死或抛 `EOFError`。现在参数全部显式传入。
+- **重复代码**：旧 `main.py` 和 `web_app.py` 各写了一遍"打开B站→搜索→取链接"的流程
+  （XPath、sleep 全一样），旧 `main.py` 还是更旧的版本 —— 它少了 `//` → `https:` 的补全，
+  拿搜索结果的 href 直接给 requests 会抛 `MissingSchema`。现在统一在 `bili_core.absolute_url`。
+- **`sys.stdout` 劫持**：旧网页版靠重定向 `sys.stdout` 抓日志，多线程下会互相串。
+  现在全部用 `log=print` 回调，网页端加锁写入任务日志。
+- **临时文件可能残留**：现在用 `try/finally` 保证清理，重复下载自动加 `(2)(3)` 后缀不覆盖。
+- **音轨格式**：moviepy 默认给 mp4 塞 mp3 音轨，改成 `audio_codec="aac"`。
+- 顺手：`web_app.py` 由 `0.0.0.0` 改回只监听 `127.0.0.1`。
+
+## 自检
+
+```bat
+python selftest.py            :: 离线 143 项：工具函数/流选择/解析/下载/批量/登录/播放/网址/网页接口
+python selftest.py --live     :: 再加真实接口 + 视频流探测（不下整片）
+python selftest.py --download :: 再真下一个短视频验证合并，下完自动删
+python selftest.py --browser  :: 再真开一次 Chrome 验证搜索（会弹窗）
+```
+
+已验证通过的实测结果：真实解析拿到 854x476 AVC 流 → 下载 4.1MB 视频 + 0.5MB 音频 →
+合并出 40.5 秒、带音轨的 7.08MB mp4；搜索步骤命中 42 个结果；
+`bili_login.py` 真开浏览器等登录、超时后不落盘、浏览器自动关闭；真实浏览器里一旦出现
+SESSDATA 能被读到并带上真实 UA；网页版下载完成后文件列表的按钮用真浏览器点过一遍
+（`播放` / `打开所在文件夹` / `打开保存目录` 都在）；按网址下载实测：`?p=2` 在真实的
+112 分P课程 `BV164411b7dx` 上取到的 cid 与接口一致、标题带 `_P2_`、视频流 HTTP 206 是 MP4 分片；
+搜索结果页展开出 43 个链接（无重复）、UP主主页展开正常；`python main.py --url BV... -p 临时目录`
+真实下完并合并成功。测试里所有"打开"动作都被替换成空函数，不会真的弹播放器。
+
+## 版本控制
+
+本地 git 仓库，**没有配置远程，不会上传**。
+`.idea/`、`__pycache__/`、`*.m4s`、`*.mp4`、`bili_session.json`（含凭据）等都已忽略。
+
+| 标签 | 内容 |
+| --- | --- |
+| `v0-重构前` | 重构前的三个脚本（含已删除的 `bili_downloader.py`、旧版 `main.py`/`web_app.py`） |
+| `v1-重构后` | 重构完成的版本 |
+
+```bat
+git log --oneline --decorate --graph       :: 看历史
+git show v0-重构前:bili_downloader.py       :: 直接看旧版的某个文件
+git diff v0-重构前 HEAD --stat              :: 看重构改了哪些文件
+git checkout v0-重构前 -- .                 :: 把旧版取回工作区（会覆盖当前文件，慎用）
+```
+
+## 注意
+
+- 搜索会真的弹出 Chrome（DrissionPage），下载过程中别关那个窗口。
+- 视频标题会清洗成合法文件名（去掉 `\/:*?"<>|`），超长截断到 80 字。
+- 下载受 B 站限速影响，脚本已按 10% 粒度打印进度。

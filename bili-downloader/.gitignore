@@ -1,0 +1,27 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# ---- IDE ----
+.idea/
+
+# ---- 下载产物 / 临时文件 ----
+# 视频默认下到 bili_config.py 里的 DEFAULT_SAVE_PATH（仓库外），
+# 这几条是防止临时目录被误提交
+*.m4s
+*.mp4
+*.mp3
+*.flac
+*.ass
+*.log
+
+# ---- 登录态（含账号凭据，绝对不要提交）----
+bili_session.json
+
+# ---- 浏览器 / DrissionPage 产生的临时数据 ----
+.DrissionPage/
+DrissionPage/
+chrome_data/

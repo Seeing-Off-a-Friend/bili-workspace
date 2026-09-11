@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>B站视频下载器</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, "Microsoft YaHei", sans-serif;
+            background: #f5f6f8;
+            color: #333;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            padding: 60px 20px;
+        }
+        .container { width: 100%; max-width: 780px; }
+
+        h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; }
+        .subtitle { color: #888; font-size: 14px; margin-bottom: 28px; }
+
+        .field { margin-bottom: 18px; }
+        .field label {
+            display: block;
+            font-size: 13px;
+            font-weight: 600;
+            color: #555;
+            margin-bottom: 6px;
+        }
+        .field input {
+            width: 100%;
+            padding: 11px 16px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 15px;
+            outline: none;
+            transition: border-color .2s;
+        }
+        .field input:focus { border-color: #fb7299; }
+        .field textarea {
+            width: 100%;
+            padding: 11px 16px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            font-family: "Cascadia Code", Consolas, monospace;
+            line-height: 1.6;
+            outline: none;
+            resize: vertical;
+            transition: border-color .2s;
+        }
+        .field textarea:focus { border-color: #fb7299; }
+
+        .mode-row { display: flex; gap: 22px; padding: 2px 0 4px; }
+        .mode-row label.mode {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            color: #555;
+            cursor: pointer;
+            margin: 0;
+        }
+        .hint code {
+            background: #eef0f4;
+            border-radius: 4px;
+            padding: 1px 5px;
+            font-size: 12px;
+            color: #c2185b;
+        }
+
+        .range-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .range-row span { color: #666; font-size: 14px; white-space: nowrap; }
+        .num-input {
+            width: 80px !important;
+            text-align: center;
+        }
+        .num-input::-webkit-inner-spin-button { opacity: 1; }
+
+        .input-row button {
+            padding: 12px 40px;
+            background: #fb7299;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background .2s;
+        }
+        .input-row button:hover { background: #f55a7a; }
+        .input-row button:disabled { background: #ccc; cursor: not-allowed; }
+        .input-row button.ghost {
+            background: #fff;
+            color: #fb7299;
+            border: 2px solid #fb7299;
+            margin-left: 10px;
+            padding: 10px 24px;
+        }
+        .input-row button.ghost:hover { background: #fff2f6; }
+        .input-row button.ghost:disabled { color: #bbb; border-color: #ddd; background: #fff; }
+        .hint { margin-top: 14px; font-size: 12.5px; color: #9a9a9a; line-height: 1.8; }
+
+        #fileList { margin-top: 18px; }
+        .file-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 9px 12px;
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: 0 1px 4px rgba(0,0,0,.06);
+            margin-bottom: 8px;
+            font-size: 13.5px;
+        }
+        .file-name {
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            color: #444;
+        }
+        .file-row button.mini {
+            padding: 6px 14px;
+            font-size: 12.5px;
+            font-weight: 600;
+            border-radius: 6px;
+            border: 1px solid #fb7299;
+            background: #fff;
+            color: #fb7299;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        .file-row button.mini:hover { background: #fff2f6; }
+        .file-row button.mini:disabled { border-color: #ddd; color: #aaa; cursor: default; }
+
+        #statusArea { display: none; margin-top: 24px; }
+        #statusArea.visible { display: block; }
+
+        .status-bar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 16px;
+            padding: 12px 16px;
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: 0 1px 4px rgba(0,0,0,.06);
+        }
+        .spinner {
+            width: 18px; height: 18px;
+            border: 3px solid #e0e0e0;
+            border-top-color: #fb7299;
+            border-radius: 50%;
+            animation: spin .8s linear infinite;
+            flex-shrink: 0;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .status-text { font-size: 14px; color: #666; }
+        .status-text.error { color: #e74c3c; }
+        .status-text.success { color: #27ae60; }
+
+        .log-box {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            font-family: "Cascadia Code", "Fira Code", Consolas, monospace;
+            font-size: 13px;
+            line-height: 1.6;
+            padding: 16px 20px;
+            border-radius: 8px;
+            max-height: 480px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        .log-box:empty::before { content: "等待开始..."; color: #666; }
+
+        .footer { margin-top: 40px; text-align: center; font-size: 13px; color: #aaa; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>B站视频批量下载器</h1>
+    <p class="subtitle">搜索关键词，批量下载B站视频（自动打开浏览器搜索；在那个 Chrome 里登录一次可提升清晰度）</p>
+
+    <div class="field">
+        <label>下载方式</label>
+        <div class="mode-row">
+            <label class="mode"><input type="radio" name="mode" value="search" checked onchange="switchMode()"> 搜索关键词</label>
+            <label class="mode"><input type="radio" name="mode" value="url" onchange="switchMode()"> 按网址下载</label>
+        </div>
+    </div>
+
+    <div class="field" id="keywordField">
+        <label for="keywordInput">搜索关键词</label>
+        <input type="text" id="keywordInput" placeholder="如 无极魔尊">
+    </div>
+
+    <div class="field" id="urlField" style="display:none;">
+        <label for="urlInput">B站网址（一行一个）</label>
+        <textarea id="urlInput" rows="5" placeholder="https://www.bilibili.com/video/BVxxxxxxxxxx&#10;https://www.bilibili.com/video/BVxxxxxxxxxx?p=3&#10;https://space.bilibili.com/123/video&#10;也可以直接粘 BV号 / av号 / b23.tv 短链"></textarea>
+        <p class="hint" style="margin-top:8px;">
+            单个视频链接：直接下载；带 <code>?p=3</code> 只下第 3 个分P。<br>
+            合集 / 收藏夹 / UP主主页 / 搜索结果页：会自动打开浏览器把里面的视频链接抓出来，
+            此时下面的「下载范围」生效；留空则全部都下。
+        </p>
+    </div>
+
+    <div class="field" id="rangeField">
+        <label>下载范围</label>
+        <div class="range-row">
+            <span>第</span>
+            <input type="number" id="startInput" value="1" min="1" class="num-input">
+            <span>个 到 第</span>
+            <input type="number" id="endInput" value="3" min="1" class="num-input">
+            <span>个</span>
+        </div>
+    </div>
+
+    <div class="field">
+        <label for="pathInput">保存路径</label>
+        <input type="text" id="pathInput" placeholder="如 D:\Downloads">
+    </div>
+
+    <div class="input-row" style="margin-top: 24px;">
+        <button id="downloadBtn" onclick="startDownload()">开始下载</button>
+        <button id="loginBtn" class="ghost" onclick="startLogin()">一键获取登录态（可选）</button>
+    </div>
+    <p class="hint">点「一键获取登录态」会弹出 Chrome，你在里面登录一次即可；之后会保存到本地，
+        高清视频需要登录（不登录只能下 480P，不影响下载本身）。</p>
+
+    <div id="statusArea">
+        <div class="status-bar" id="statusBar">
+            <div class="spinner" id="spinner"></div>
+            <span class="status-text" id="statusText">正在启动...</span>
+        </div>
+        <div class="log-box" id="logArea"></div>
+        <div id="fileList"></div>
+    </div>
+
+    <div class="footer">基于本地爬虫脚本 · 自动打开浏览器搜索B站</div>
+</div>
+
+<script>
+    let pollingTimer = null;
+
+    function currentMode() {
+        const checked = document.querySelector('input[name="mode"]:checked');
+        return checked ? checked.value : 'search';
+    }
+
+    function switchMode() {
+        const urlMode = currentMode() === 'url';
+        document.getElementById('keywordField').style.display = urlMode ? 'none' : '';
+        document.getElementById('urlField').style.display = urlMode ? '' : 'none';
+        // 网址模式下范围留空 = 全部都下；切回搜索模式恢复默认 1~3
+        document.getElementById('startInput').value = urlMode ? '' : '1';
+        document.getElementById('endInput').value = urlMode ? '' : '3';
+    }
+
+    function startDownload() {
+        const urlMode = currentMode() === 'url';
+        const keyword = document.getElementById('keywordInput').value.trim();
+        const urls = document.getElementById('urlInput').value.trim();
+        const start = document.getElementById('startInput').value.trim();
+        const end = document.getElementById('endInput').value.trim();
+        const path = document.getElementById('pathInput').value.trim();
+
+        if (urlMode) {
+            if (!urls) { alert('请粘贴至少一个 B站网址'); return; }
+        } else {
+            if (!keyword) { alert('请输入搜索关键词'); return; }
+            if (!start || !end) { alert('请填写视频范围'); return; }
+        }
+        if (!path) { alert('请填写保存路径'); return; }
+
+        const btn = document.getElementById('downloadBtn');
+        const statusArea = document.getElementById('statusArea');
+        const logArea = document.getElementById('logArea');
+        const statusText = document.getElementById('statusText');
+
+        btn.disabled = true;
+        btn.textContent = '下载中...';
+        logArea.textContent = '';
+        document.getElementById('fileList').textContent = '';
+        statusArea.classList.add('visible');
+        statusText.className = 'status-text';
+        statusText.textContent = '正在启动...';
+        document.getElementById('spinner').style.display = '';
+
+        const body = 'keyword=' + encodeURIComponent(keyword)
+                   + '&urls=' + encodeURIComponent(urlMode ? urls : '')
+                   + '&start=' + encodeURIComponent(start)
+                   + '&end=' + encodeURIComponent(end)
+                   + '&path=' + encodeURIComponent(path);
+
+        fetch('/download', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: body
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.error) {
+                statusText.className = 'status-text error';
+                statusText.textContent = data.error;
+                document.getElementById('spinner').style.display = 'none';
+                btn.disabled = false;
+                btn.textContent = '开始下载';
+                return;
+            }
+            pollStatus(data.task_id);
+        })
+        .catch(err => {
+            statusText.className = 'status-text error';
+            statusText.textContent = '请求失败: ' + err.message;
+            document.getElementById('spinner').style.display = 'none';
+            btn.disabled = false;
+            btn.textContent = '开始下载';
+        });
+    }
+
+    function startLogin() {
+        const btn = document.getElementById('loginBtn');
+        const statusArea = document.getElementById('statusArea');
+        const logArea = document.getElementById('logArea');
+        const statusText = document.getElementById('statusText');
+
+        btn.disabled = true;
+        btn.textContent = '等待登录...';
+        logArea.textContent = '';
+        statusArea.classList.add('visible');
+        statusText.className = 'status-text';
+        statusText.textContent = '已打开浏览器，请在弹出的 Chrome 里登录 B 站...';
+        document.getElementById('spinner').style.display = '';
+
+        fetch('/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: 'timeout=180'
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.error) {
+                statusText.className = 'status-text error';
+                statusText.textContent = data.error;
+                document.getElementById('spinner').style.display = 'none';
+                btn.disabled = false;
+                btn.textContent = '一键获取登录态（可选）';
+                return;
+            }
+            pollLogin(data.task_id);
+        })
+        .catch(err => {
+            statusText.className = 'status-text error';
+            statusText.textContent = '请求失败: ' + err.message;
+            document.getElementById('spinner').style.display = 'none';
+            btn.disabled = false;
+            btn.textContent = '一键获取登录态（可选）';
+        });
+    }
+
+    function pollLogin(taskId) {
+        const logArea = document.getElementById('logArea');
+        const statusText = document.getElementById('statusText');
+        const btn = document.getElementById('loginBtn');
+
+        fetch('/status/' + taskId)
+        .then(r => r.json())
+        .then(data => {
+            if (data.log) {
+                logArea.textContent = data.log;
+                logArea.scrollTop = logArea.scrollHeight;
+            }
+            if (data.status === 'completed' || data.status === 'error') {
+                statusText.className = 'status-text ' + (data.status === 'completed' ? 'success' : 'error');
+                statusText.textContent = data.message || (data.status === 'completed' ? '登录成功！' : '未检测到登录');
+                document.getElementById('spinner').style.display = 'none';
+                btn.disabled = false;
+                btn.textContent = '一键获取登录态（可选）';
+            } else {
+                setTimeout(() => pollLogin(taskId), 1500);
+            }
+        })
+        .catch(err => {
+            statusText.className = 'status-text error';
+            statusText.textContent = '查询失败: ' + err.message;
+            document.getElementById('spinner').style.display = 'none';
+            btn.disabled = false;
+            btn.textContent = '一键获取登录态（可选）';
+        });
+    }
+
+    function fileNameOf(p) {
+        const parts = String(p).split(/[\\/]/);
+        return parts[parts.length - 1] || p;
+    }
+
+    function openItem(taskId, index, action, btn) {
+        const old = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = '打开中...';
+        const body = 'task_id=' + encodeURIComponent(taskId)
+                   + '&index=' + encodeURIComponent(index === null ? '' : index)
+                   + '&action=' + encodeURIComponent(action);
+        fetch('/open', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: body
+        })
+        .then(r => r.json().then(d => ({ ok: r.ok, d: d })))
+        .then(res => {
+            btn.textContent = res.ok ? '已打开' : (res.d.error || '失败');
+            setTimeout(() => { btn.textContent = old; btn.disabled = false; }, 1600);
+        })
+        .catch(() => {
+            btn.textContent = '失败';
+            setTimeout(() => { btn.textContent = old; btn.disabled = false; }, 1600);
+        });
+    }
+
+    function renderFiles(taskId, files) {
+        const box = document.getElementById('fileList');
+        box.textContent = '';
+        if (!files || !files.length) return;
+
+        files.forEach((p, i) => {
+            const row = document.createElement('div');
+            row.className = 'file-row';
+
+            const name = document.createElement('span');
+            name.className = 'file-name';
+            name.textContent = fileNameOf(p);
+            name.title = p;
+
+            const play = document.createElement('button');
+            play.className = 'mini';
+            play.textContent = '播放';
+            play.onclick = () => openItem(taskId, i, 'play', play);
+
+            const folder = document.createElement('button');
+            folder.className = 'mini';
+            folder.textContent = '打开所在文件夹';
+            folder.onclick = () => openItem(taskId, i, 'folder', folder);
+
+            row.appendChild(name);
+            row.appendChild(play);
+            row.appendChild(folder);
+            box.appendChild(row);
+        });
+
+        const bar = document.createElement('div');
+        bar.className = 'file-row';
+        const tip = document.createElement('span');
+        tip.className = 'file-name';
+        tip.textContent = '共 ' + files.length + ' 个文件';
+        const all = document.createElement('button');
+        all.className = 'mini';
+        all.textContent = '打开保存目录';
+        all.onclick = () => openItem(taskId, null, 'save_folder', all);
+        bar.appendChild(tip);
+        bar.appendChild(all);
+        box.appendChild(bar);
+    }
+
+    function pollStatus(taskId) {
+        const logArea = document.getElementById('logArea');
+        const statusText = document.getElementById('statusText');
+        const btn = document.getElementById('downloadBtn');
+
+        fetch('/status/' + taskId)
+        .then(r => r.json())
+        .then(data => {
+            if (data.log) {
+                logArea.textContent = data.log;
+                logArea.scrollTop = logArea.scrollHeight;
+            }
+
+            if (data.status === 'completed') {
+                statusText.className = 'status-text success';
+                statusText.textContent = '下载完成！';
+                document.getElementById('spinner').style.display = 'none';
+                btn.disabled = false;
+                btn.textContent = '开始下载';
+                clearTimeout(pollingTimer);
+                renderFiles(taskId, data.files);
+            } else if (data.status === 'error') {
+                statusText.className = 'status-text error';
+                statusText.textContent = data.message;
+                document.getElementById('spinner').style.display = 'none';
+                btn.disabled = false;
+                btn.textContent = '开始下载';
+                clearTimeout(pollingTimer);
+            } else {
+                pollingTimer = setTimeout(() => pollStatus(taskId), 1500);
+            }
+        })
+        .catch(err => {
+            statusText.className = 'status-text error';
+            statusText.textContent = '查询失败: ' + err.message;
+            document.getElementById('spinner').style.display = 'none';
+            btn.disabled = false;
+            btn.textContent = '开始下载';
+            clearTimeout(pollingTimer);
+        });
+    }
+</script>
+</body>
+</html>
